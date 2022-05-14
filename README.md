@@ -1,0 +1,1 @@
+# esphome-wiegand-reader
