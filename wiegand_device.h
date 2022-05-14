@@ -11,8 +11,8 @@
  * Wiegand keypad. This device calls a service on Home Assistant when a code is available
  *
  * Samples key presses every 200ms and stores the key in a string until:
- *   [1] - the user presses a '#' which sends the code immediately
- *   [2] - the user presses nothing for 2,000ms (inter-digit timer) which then sends the code
+ *   [1] - the user presses a '#' which sends the code immediately (of between 4 and 6 digits)
+ *   [2] - the user presses nothing for 2,000ms (inter-digit timer) which then clear the code
  *   [3] - the user presses a '*' which sends the '*' immediately
  */
 class WiegandReader : public PollingComponent, public TextSensor {
@@ -55,12 +55,17 @@ public:
                 // We have a digit, make it ASCII for convenience
                 keyCodes += (_code + 0x30);
             } else if(_code == 11) {
-                // The user pressed '#', send the accumulated code and reset for the next string
-                publishCode(keyCodes);
+                // The user pressed '#', send the accumulated code (4 to 6 digits only) and reset for the next string
+				if(keyCodes.length() >= 4 && keyCodes.length() <= 6) { publishCode(keyCodes); }
                 keyCodes = "";
             } else if(_code == 10) {
                 // The user pressed '*', clear the code and send the asterisk
                 publishCode("*");
+                keyCodes = "";
+            } else if(_code > 99) {
+                // RFID tag detected (3+ digits at once), send the accumulated code and reset for the next string
+				keyCodes = to_string(_code);
+                publishCode(keyCodes);
                 keyCodes = "";
             }
             // Capture the last time we received a code
@@ -71,7 +76,6 @@ public:
                 if(millis() - lastCode > 2000) {
                     // The interdigit timer expired, send the code and reset for the next string
                     ESP_LOGD("wiegandReader", "Interdigit timer expired");
-					publishCode(keyCodes);
                     keyCodes = "";
                 }
             }
