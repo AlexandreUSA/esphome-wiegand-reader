@@ -22,14 +22,13 @@ api:
 
 ota:
 
-# Example configuration entry
+# Text sensor to return code or card ID
 text_sensor:
 - platform: custom
   lambda: |-
     auto wiegand = new WiegandReader(D1, D2);
     App.register_component(wiegand);
     return {wiegand};
-    
   text_sensors:
     name: "Card ID"
     on_value:
@@ -39,7 +38,8 @@ text_sensor:
 
 status_led:
   pin: D4 # GPIO2
- 
+
+# Binary sensors to return status of the doors (open vs close)
 binary_sensor:
 - platform: gpio
   pin:
@@ -69,6 +69,7 @@ binary_sensor:
   filters:
     - delayed_on_off: 100ms 
 
+# Switch to open or close the garage doors
 switch:
 - platform: gpio
   id: relay1
