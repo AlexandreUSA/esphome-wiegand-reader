@@ -18,6 +18,9 @@
 class WiegandReader : public PollingComponent, public TextSensor {
 
 public:
+    TextSensor *code = new TextSensor();
+    TextSensor *door = new TextSensor();
+
     WiegandReader(int pinD0, int pinD1)
         : PollingComponent(200),
         pinD0(pinD0), pinD1(pinD1) {
@@ -39,8 +42,8 @@ public:
         pinMode(pinD1, INPUT);
 
         // Attach the interrupts
-        attachInterrupt(digitalPinToInterrupt(pinD0), ReadD0, FALLING);  // Hardware interrupt - high to low pulse
-        attachInterrupt(digitalPinToInterrupt(pinD1), ReadD1, FALLING);  // Hardware interrupt - high to low pulse
+        attachInterrupt(digitalPinToInterrupt(pinD0), ReadD0, RISING);  // Hardware interrupt - low to high pulse OR FALLING high to low
+        attachInterrupt(digitalPinToInterrupt(pinD1), ReadD1, RISING);  // Hardware interrupt - low to high pulse OR FALLING high to low
     }
 
     void update() override {
@@ -53,30 +56,37 @@ public:
 			ESP_LOGD("wiegandReader", "key: %ld", _code);
             if(_code < 10) {
                 // We have a digit, make it ASCII for convenience
-                keyCodes += (_code + 0x30);
+                keyCode += (_code + 0x30);
             } else if(_code == 11) {
-                // The user pressed '#', send the accumulated code (4 to 6 digits only) and reset for the next string
-				if(keyCodes.length() >= 4 && keyCodes.length() <= 6) { publishCode(keyCodes); }
-                keyCodes = "";
+                // The user pressed '#', send the accumulated code (4 to 6 digits only), the RIGHT door ID, and reset for the next string
+				if(keyCode.length() >= 4 && keyCode.length() <= 6) { 
+				    keyDoor = "Right";
+				    publishCodeAndDoor(keyCode, keyDoor); 
+				}
+                keyCode = "";
             } else if(_code == 10) {
-                // The user pressed '*', clear the code and send the asterisk
-                publishCode("*");
-                keyCodes = "";
+                // The user pressed '*', send the accumulated code (4 to 6 digits only), the LEFT door ID, and reset for the next string
+				if(keyCode.length() >= 4 && keyCode.length() <= 6) { 
+				    keyDoor = "Left";
+				    publishCodeAndDoor(keyCode, keyDoor); 
+				}
+                keyCode = "";
             } else if(_code > 99) {
                 // RFID tag detected (3+ digits at once), send the accumulated code and reset for the next string
-				keyCodes = to_string(_code);
-                publishCode(keyCodes);
-                keyCodes = "";
+				keyCode = to_string(_code);
+				keyDoor = "Right";
+                publishCodeAndDoor(keyCode, keyDoor);
+                keyCode = "";
             }
             // Capture the last time we received a code
             lastCode = millis();
         } else {
-            if(keyCodes.length() > 0) {
+            if(keyCode.length() > 0) {
                 // We have a keyCode, see if the interdigit timer expired
                 if(millis() - lastCode > 2000) {
                     // The interdigit timer expired, send the code and reset for the next string
                     ESP_LOGD("wiegandReader", "Interdigit timer expired");
-                    keyCodes = "";
+                    keyCode = "";
                 }
             }
         }
@@ -91,7 +101,8 @@ private:
     static unsigned long _code;
 
     unsigned long lastCode = 0;
-    std::string keyCodes = "";
+    std::string keyCode = "";
+	std::string keyDoor = "";
 
     int pinD0;
     int pinD1;
@@ -100,15 +111,16 @@ private:
      * Publish the key code to the TextSensor
      * @param keyCode
      */
-    void publishCode(std::string keyCode) {
+    void publishCodeAndDoor(std::string keypadCode, std::string keypadDoor) {
 	     ESP_LOGD("wiegandReader", "Code sent: %s", keyCode.c_str());
-		 publish_state(keyCode);
+		 code->publish_state(keypadCode);
+		 door->publish_state(keypadDoor);
     }
-
+	
     /**
      * D0 Interrupt Handler
      */
-    static IRAM_ATTR void ReadD0() {
+    static void ReadD0() {
         _bitCount++;				// Increment bit count for Interrupt connected to D0
         if(_bitCount > 31) { 		// If bit count more than 31, process high bits
             _cardTempHigh |= ((0x80000000 & _cardTemp)>>31);	//	shift value to high bits
@@ -123,7 +135,7 @@ private:
     /**
      * D1 Interrupt Handler
      */
-    static IRAM_ATTR void ReadD1() {
+    static void ReadD1() {
         _bitCount ++;				// Increment bit count for Interrupt connected to D1
 
         if(_bitCount > 31) {		// If bit count more than 31, process high bits
