@@ -1,0 +1,177 @@
+substitutions:
+  systemName: "Garage"
+  ##esp32
+  relayPIN1: "17" #GPIO OUTPUT pin to use for enabling the relay 1 to control garage door 1
+  relayPIN2: "18" #GPIO OUTPUT pin to use for enabling the relay 2 to control garage door 2
+  magSensorPIN1: "19" #GPIO INPUT pin to use for enabling the relay 1 to control garage door 1
+  magSensorPIN2: "21" #GPIO INPUT pin to use for enabling the relay 2 to control garage door 2
+  keypadWiegandPIND0: "34" #GPIO INPUT pin to use for Wiegand D0 (D0: green line) 
+  keypadWiegandPIND1: "35" #GPIO INPUT pin to use for Wiegand D1 (D1: white line)
+  keypadTamperPIN: "25" # GPIO INPUT pin for tamper (TAMPER: purple line) - High: ok, Low: tamper
+  keypadOkPIN: "26" # GPIO OUTPUT pin to use for red LED (ERR: brown line) - Low to enable
+  keypadErrPIN: "27" # GPIO OUTPUT pin to use for green LED (OK: orange line) - Low to enable
+  keypadbBeepPIN: "32" # GPIO OUPUT pin to use for buzzer (BEEP: purple line) - Low to enable
+
+  
+
+esphome:
+  name: garage
+  includes:
+    - workspace/garage/wiegand_device.h
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+   password: !secret api_password
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  domain: !secret wifi_domain
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "$systemName Fallback Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+    
+# Text sensor to return code or card ID
+text_sensor:
+  - platform: custom
+    lambda: |-
+      auto wiegand = new WiegandReader($keypadWiegandPIND0, $keypadWiegandPIND1);
+      App.register_component(wiegand);
+      return {wiegand->code, wiegand->door};
+
+    text_sensors:
+      - name: "$systemName Card ID"
+        id: cardID
+        on_value:
+          then:
+            - homeassistant.tag_scanned: !lambda |-
+                return x;
+      - name: "$systemName Door ID"
+        on_value:
+          then:
+            - homeassistant.service:
+                service: script.garage_keypad
+                data:
+                  code: !lambda |-
+                    return id(cardID).state;
+                  door: !lambda |-
+                    return x;
+
+binary_sensor:
+# Binary sensors to return status of the doors (open vs close)
+  - platform: gpio 
+    pin:
+      number: $magSensorPIN1
+      mode: INPUT_PULLUP
+      inverted: False
+    name: "$systemName Door Sensor - Left"
+    device_class: garage_door
+    filters:
+      - delayed_on_off: 200ms
+
+  - platform: gpio
+    pin:
+      number: $magSensorPIN2
+      mode: INPUT_PULLUP
+      inverted: False
+    name: "$systemName Door Sensor - Right"
+    device_class: garage_door
+    filters:
+      - delayed_on_off: 200ms
+      
+  - platform: gpio
+    pin:
+      number: $keypadTamperPIN
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "$systemName Keypad Tamper"
+    device_class: tamper
+    filters:
+      - delayed_on_off: 200ms
+
+switch:
+# Switch to open or close the garage doors
+  - platform: gpio
+    id: relay1
+    pin:
+      number: $relayPIN1
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    
+  - platform: template
+    name: "$systemName Door - Left"
+    icon: "mdi:garage"
+    turn_on_action:
+    - switch.turn_on: relay1
+    - delay: 1s
+    - switch.turn_off: relay1
+    
+  - platform: gpio
+    id: relay2
+    pin:
+      number: $relayPIN2
+      inverted: false
+    restore_mode: ALWAYS_OFF
+    
+  - platform: template
+    name: "$systemName Door - Right"
+    icon: "mdi:garage"
+    turn_on_action:
+      - switch.turn_on: relay2
+      - delay: 1s
+      - switch.turn_off: relay2
+
+# Swich to control the buzzer
+  - platform: gpio
+    name: "$systemName Keypad Buzzer"
+    icon: "mdi:volume-high"
+    pin: $keypadbBeepPIN
+    id: keypadBeep
+    on_turn_on:
+    - delay: 500ms
+    - switch.turn_off: keypadBeep 
+    restore_mode: ALWAYS_OFF
+    
+# Swich to control the OK led
+  - platform: gpio
+    name: "$systemName Keypad LED OK"
+    icon: "mdi:account-check"
+    pin: $keypadOkPIN
+    id: keypadOk
+    on_turn_on:
+    - delay: 500ms
+    - switch.turn_off: keypadOk 
+    restore_mode: ALWAYS_OFF
+    
+# Switch to restart
+  - platform: restart
+    name: "$systemName Doors Restart"
+    
+# Light to control the Error LED  
+light:
+  - platform: status_led
+    name: "$systemName Keypad LED Error"
+    icon: "mdi:account-alert"
+    pin: $keypadErrPIN
+    id: keypadErr
+    on_turn_on:
+    - delay: 500ms
+    - light.turn_off: keypadErr
+    
+status_led:
+  pin: GPIO2
